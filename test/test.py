@@ -34,12 +34,12 @@ def test_search():
     def func():
         low.PRE_TAG = '<span style="color:red">'
         low.POST_TAG = '</span>'
-        r = low.search("上海苹果限制app", highlight=True)
-        for i in r:
-            print(r)
+        r = low.search("上海电信", highlight=True)
+        for o in r:
+            print(o)
 
-    # for i in range(0, 100):
-    func()
+    for i in range(0, 1):
+        func()
 
 
 if __name__ == '__main__':

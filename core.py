@@ -7,6 +7,8 @@ import struct
 import json
 from io import BytesIO
 import pickle
+from numba import jit
+from numba.roc.decorators import autojit
 
 
 class LowSearch(object):
@@ -176,6 +178,12 @@ class LowSearch(object):
         :param doc:
         :return:
         """
+
+        # 需要记录下id对应文档的位置
+
+        pass
+
+    def delete_document(self):
         pass
 
     def search(self, keyword, highlight=False, limit=10):
@@ -183,11 +191,11 @@ class LowSearch(object):
         1. 搜索词典
         2. 读取文档
         3. 根据评分排序
+        :param limit:
+        :param highlight:
         :param keyword:
         :return:
         """
-        # 储存搜索结果
-        doc_pos = []
 
         # 不缺分大小写字母
         keyword = keyword.upper()
@@ -196,51 +204,66 @@ class LowSearch(object):
 
         # 这搜索还要考虑到score和排序等
         # 击中的关键词
+        hit_keys, doc_pos = self._search_index(keys, highlight)
+
+        # print(f'检索到的数据位置：{doc_pos}')
+
+        # print(f'得分情况：{pos_scores}')
+
+        return self._get_doc(doc_pos, hit_keys, highlight, limit)
+
+    def _search_index(self, keys, highlight):
         hit_keys = []
         # 得分
-        pos_scores = {}
-        keys_length = 0
+        doc_pos = []
+        doc_pos_scores = {}
+        key_len = 0
         for key in keys:
-            keys_length += 1
-            if key in self.indexs:
+            pos = self.indexs.get(key, None)
+            if pos:
+                key_len += 1
+                if highlight:
+                    hit_keys.append(key)
 
-                hit_keys.append(key)
-
-                pos = self.indexs[key]
                 for p in pos:
                     if p not in doc_pos:
                         doc_pos.append(p)
-                    if p not in pos_scores:
-                        pos_scores[p] = 1
+                        doc_pos_scores[p] = 1
                     else:
-                        pos_scores[p] += 1
+                        doc_pos_scores[p] += 1
 
-        print(f'检索到的数据位置：{doc_pos}')
+        # doc_pos_scores 转为数组
 
-        print(f'得分情况：{pos_scores}')
-        for i in pos_scores:
-            print(f"pos:{i}，score:{pos_scores[i] / keys_length}")
-        # 储存结果
+        pos_kv = []
+        for i in doc_pos_scores:
+            pos_kv.append((doc_pos_scores.get(i), i))
 
-        # 根据得分、排序、分页，最后计算出来的索引 用来读取doc
-
-        # 对doc进行冒泡排序
-        # 遍历所有数组元素
-        n = len(doc_pos)
+        # 冒泡排序
+        n = len(pos_kv)
         for i in range(n):
-            # Last i elements are already in place
             for j in range(0, n - i - 1):
-                if doc_pos[j] > doc_pos[j + 1]:
-                    doc_pos[j], doc_pos[j + 1] = doc_pos[j + 1], doc_pos[j]
-        print(doc_pos)
-        rs = []
+                if pos_kv[j][0] < pos_kv[j + 1][0]:
+                    pos_kv[j], pos_kv[j + 1] = pos_kv[j + 1], pos_kv[j]
 
+        # 推导式，取到索引位置号
+        doc_pos = [(i[1], i[0] / key_len) for i in pos_kv]
+
+        return hit_keys, doc_pos
+
+    def _get_doc(self, doc_pos, hit_keys, highlight=False, limit=10):
+        """
+        从文档中读取符合条件的数据
+        :param doc_pos:
+        :param hit_keys:
+        :param highlight:
+        :param limit:
+        :return:
+        """
         if not os.path.exists(self.doc_file):
             raise FileNotFoundError(f"没有找到索引文件:{self.doc_file}，请将建立索引。")
-
-        fields = self.index_fields
+        rs = []
         with open(self.doc_file, 'rb') as f:
-            for pos in doc_pos:
+            for pos, score in doc_pos:
                 start = (pos - 1) * self.DOC_CHUNK
                 f.seek(start, 0)
 
@@ -255,7 +278,12 @@ class LowSearch(object):
                     # 高亮处理
                     if highlight:
                         data = self._highlight(hit_keys, data)
-                    rs.append(data)
+
+                    rs.append({
+                        'score': score,
+                        'pos': pos,
+                        'doc': data
+                    })
                 else:
                     break
         return rs
