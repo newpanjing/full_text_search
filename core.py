@@ -20,13 +20,19 @@ class LowSearch(object):
     DOC_HEADER_LEN = 2
     DOC_CHUNK = 4 * 1024 + DOC_HEADER_LEN
 
+    # 高亮开始标签
+    PRE_TAG = "<em>"
+    # 高亮结束标签
+    POST_TAG = "</em>"
+
     indexs = {
 
     }
 
     def __init__(self, index_dir, index_fields):
         if not os.path.exists(index_dir):
-            print("索引目录不存在，创建索引")
+            print("索引目录不存在，创建目录")
+            os.mkdir(index_dir)
 
         self.index_dir = index_dir
         self.index_fields = index_fields
@@ -120,7 +126,7 @@ class LowSearch(object):
             bs = bytes(json.dumps(doc), 'utf8')
             data_len = len(bs)
             if data_len > chunk - self.DOC_HEADER_LEN:
-                print(f"写入的块不能大于${chunk}字节。")
+                raise ValueError(f"写入的块不能大于{chunk}字节。len:{data_len},doc:{doc}")
 
             # 写入头长度
             buffer.write(struct.pack('h', data_len))
@@ -158,7 +164,8 @@ class LowSearch(object):
                 r = jieba.cut_for_search(doc.get(f))
                 for i in r:
                     if i not in keywords:
-                        keywords.append(i)
+                        # 索引全部存大写
+                        keywords.append(i.upper())
 
         return self._index_doc(keywords, doc)
 
@@ -171,7 +178,7 @@ class LowSearch(object):
         """
         pass
 
-    def search(self, keyword, highlight=None, limit=10):
+    def search(self, keyword, highlight=False, limit=10):
         """
         1. 搜索词典
         2. 读取文档
@@ -182,36 +189,91 @@ class LowSearch(object):
         # 储存搜索结果
         doc_pos = []
 
-        # 这搜索还要考虑到score和排序等
-
+        # 不缺分大小写字母
+        keyword = keyword.upper()
         # 分词
         keys = jieba.cut_for_search(keyword)
+
+        # 这搜索还要考虑到score和排序等
+        # 击中的关键词
+        hit_keys = []
+        # 得分
+        pos_scores = {}
+        keys_length = 0
         for key in keys:
+            keys_length += 1
             if key in self.indexs:
+
+                hit_keys.append(key)
+
                 pos = self.indexs[key]
                 for p in pos:
                     if p not in doc_pos:
                         doc_pos.append(p)
+                    if p not in pos_scores:
+                        pos_scores[p] = 1
+                    else:
+                        pos_scores[p] += 1
 
         print(f'检索到的数据位置：{doc_pos}')
 
+        print(f'得分情况：{pos_scores}')
+        for i in pos_scores:
+            print(f"pos:{i}，score:{pos_scores[i] / keys_length}")
         # 储存结果
+
+        # 根据得分、排序、分页，最后计算出来的索引 用来读取doc
+
+        # 对doc进行冒泡排序
+        # 遍历所有数组元素
+        n = len(doc_pos)
+        for i in range(n):
+            # Last i elements are already in place
+            for j in range(0, n - i - 1):
+                if doc_pos[j] > doc_pos[j + 1]:
+                    doc_pos[j], doc_pos[j + 1] = doc_pos[j + 1], doc_pos[j]
+        print(doc_pos)
         rs = []
 
+        if not os.path.exists(self.doc_file):
+            raise FileNotFoundError(f"没有找到索引文件:{self.doc_file}，请将建立索引。")
+
+        fields = self.index_fields
         with open(self.doc_file, 'rb') as f:
             for pos in doc_pos:
                 start = (pos - 1) * self.DOC_CHUNK
-                f.seek(start)
+                f.seek(start, 0)
 
                 # 先读取2字节
                 data_len, = struct.unpack('h', f.read(self.DOC_HEADER_LEN))
+                if data_len == 0:
+                    continue
                 # print(f'数据包长度：{data_len}')
                 r = f.read(data_len)
                 if len(rs) < limit:
-                    rs.append(json.loads(r.decode()))
+                    data = json.loads(r.decode())
+                    # 高亮处理
+                    if highlight:
+                        data = self._highlight(hit_keys, data)
+                    rs.append(data)
                 else:
                     break
         return rs
+
+    def _highlight(self, hit_keys, data):
+
+        """
+        高亮处理
+        """
+        for key in self.index_fields:
+            if key in data:
+                val = data.get(key)
+                # 只有字符串才做处理
+                if isinstance(val, str):
+                    for hit in hit_keys:
+                        val = val.replace(hit, f'{self.PRE_TAG}{hit}{self.POST_TAG}')
+                    data[key] = val
+        return data
 
 
 def time_me(fn):
@@ -223,31 +285,3 @@ def time_me(fn):
         print(f"{fn.__name__}执行耗时：{end - start}ms")
 
     return _wrapper
-
-
-@time_me
-def test_index():
-    path = os.path.join(os.path.dirname(__file__), "index")
-    # low = LowSearch(index_dir=path, index_fields=['title', 'content'])
-    low = LowSearch(index_dir=path, index_fields=['title', 'content'])
-
-    for i in range(0, 1):
-        _pk = low.add_document({
-            "title": f"雷军向金山所有员工赠予{i}每人600股的股票",
-            "content": "品玩7月5日讯，雷军今天宣布，为金山集团所有在职正式员工准备了“特殊的纪念品”，赠予金山员工每人 600 股股票。",
-            # "_pk": "1"
-        })
-
-
-@time_me
-def test_search():
-    path = os.path.join(os.path.dirname(__file__), "index")
-    low = LowSearch(index_dir=path, index_fields=['title', 'content'])
-    r = low.search("雷军")
-    print(r)
-
-
-if __name__ == '__main__':
-    # test_index()
-    #
-    test_search()
