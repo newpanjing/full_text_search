@@ -34,7 +34,7 @@ def test_search():
     def func():
         low.PRE_TAG = '<span style="color:red">'
         low.POST_TAG = '</span>'
-        r = low.search("上海电信", highlight=True)
+        r = low.search("获得不同的视角和体验", highlight=True)
         for o in r:
             print(o)
 

@@ -219,7 +219,9 @@ class LowSearch(object):
         doc_pos_scores = {}
         key_len = 0
         for key in keys:
+            s = time.time() * 1000
             pos = self.indexs.get(key, None)
+            print(f"耗时：{time.time() * 1000 - s}")
             if pos:
                 key_len += 1
                 if highlight:
